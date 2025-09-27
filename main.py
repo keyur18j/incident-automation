@@ -2,6 +2,37 @@ from flask import Flask, request, jsonify
 import os
 import requests
 
+from sqlalchemy import create_engine, Column, String, Text
+from sqlalchemy.orm import declarative_base, sessionmaker
+
+engine = create_engine('sqlite:///incidents.db')
+Base = declarative_base()
+
+class Incident(Base):
+    __tablename__ = 'incidents'
+    incident_id = Column(String, primary_key=True)
+    type = Column(String)
+    description = Column(Text)
+    severity = Column(String)
+    remedy = Column(Text)
+
+Base.metadata.create_all(engine)
+Session = sessionmaker(bind=engine)
+
+def save_incident(incident, severity, remedy):
+    session = Session()
+    record = Incident(
+        incident_id=incident.get('incident_id'),
+        type=incident.get('type'),
+        description=incident.get('description'),
+        severity=severity,
+        remedy=remedy
+    )
+    session.merge(record)
+    session.commit()
+    session.close()
+
+
 def create_github_issue(incident, severity, remedy):
     GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')  
     REPO = 'keyur18j/incident-automation'        
@@ -89,7 +120,7 @@ def receive_incident():
     remedy = get_remedy(data, severity)
 
     print(f"Incident {data.get('incident_id')} classified as {severity}.")
-    
+    save_incident(data, severity, remedy)
     response_data = {
         "status": "Incident processed successfully",
         "incident_id": data.get("incident_id"),
@@ -104,6 +135,22 @@ def receive_incident():
         response_data["github_issue_url"] = None
 
     return jsonify(response_data), 200
+
+@app.route('/incident/list', methods=['GET'])
+def list_incidents():
+    session = Session()
+    incidents = session.query(Incident).all()
+    session.close()
+    return jsonify([
+        {
+            "incident_id": i.incident_id,
+            "type": i.type,
+            "description": i.description,
+            "severity": i.severity,
+            "remedy": i.remedy,
+        } for i in incidents
+    ])
+
 
 if __name__ == '__main__':
     app.run(port=5000, debug=True)
